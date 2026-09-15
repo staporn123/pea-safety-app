@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>กฟส.อากาศอำนวย - ระบบเบิกจ่ายอุปกรณ์ PPE & Google Sheets Backend</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts: Sarabun & Kanit -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- SheetJS for exporting Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        pea: {
+                            50: '#fbf4ff',
+                            100: '#f5e6ff',
+                            500: '#8e24aa',
+                            600: '#7b1fa2',
+                            700: '#6a1b9a',
+                            800: '#4a148c',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Sarabun', 'Kanit', 'sans-serif'],
+                        heading: ['Kanit', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Sarabun', 'Kanit', sans-serif; background-color: #f8fafc; }
+        .font-heading { font-family: 'Kanit', sans-serif; }
+        .table-scrollbar::-webkit-scrollbar { height: 10px; width: 8px; }
+        .table-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .table-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .table-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <!-- Top Header -->
+    <header class="bg-gradient-to-r from-purple-900 via-purple-800 to-indigo-900 text-white shadow-lg sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-amber-500 p-2.5 rounded-xl text-purple-950 font-bold shadow-md">
+                    <i class="fa-solid fa-hard-hat text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl md:text-2xl font-bold font-heading tracking-wide">กฟส.อากาศอำนวย</h1>
+                    <p class="text-xs text-purple-200">ระบบเบิกจ่ายอุปกรณ์ PPE (เชื่อมต่อ Google Sheets Backend)</p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <button onclick="toggleAddEmployeeModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3.5 py-2 rounded-lg shadow-md transition flex items-center gap-2 text-xs">
+                    <i class="fa-solid fa-user-plus"></i>
+                    <span>+ เพิ่มผู้ปฏิบัติงาน</span>
+                </button>
+                <button onclick="toggleBackendModal()" class="bg-purple-700 hover:bg-purple-600 text-white font-medium px-3.5 py-2 rounded-lg shadow-md transition flex items-center gap-2 text-xs">
+                    <i class="fa-solid fa-server"></i>
+                    <span>ตั้งค่า Backend</span>
+                </button>
+                <button onclick="syncDataFromSheets()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-3.5 py-2 rounded-lg shadow-md transition flex items-center gap-2 text-xs">
+                    <i class="fa-solid fa-rotate text-sm" id="sync-icon"></i>
+                    <span>ดึงข้อมูลล่าสุด</span>
+                </button>
+                <button onclick="saveDataToSheets()" class="bg-amber-500 hover:bg-amber-400 text-purple-950 font-semibold px-3.5 py-2 rounded-lg shadow-md transition flex items-center gap-2 text-xs">
+                    <i class="fa-solid fa-floppy-disk"></i>
+                    <span>บันทึกลง Google Sheets</span>
+                </button>
+                <button onclick="exportToExcel()" class="bg-teal-600 hover:bg-teal-500 text-white font-medium px-3.5 py-2 rounded-lg shadow-md transition flex items-center gap-2 text-xs">
+                    <i class="fa-solid fa-file-excel"></i>
+                    <span>ดาวน์โหลด Excel</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-grow w-full space-y-6">
+
+        <!-- Backend Connection Indicator -->
+        <div id="backend-status-banner" class="bg-blue-50 border border-blue-200 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+            <div class="flex items-center gap-2 text-blue-800">
+                <span class="relative flex h-3 w-3">
+                    <span id="status-ping-outer" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span id="status-ping-inner" class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                </span>
+                <span id="backend-status-text"><strong>สถานะระบบ:</strong> ใช้งาน Local Cache / พร้อมเชื่อมต่อ Google Apps Script Web App</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <a href="https://docs.google.com/spreadsheets/d/1n9sTo2JKOHOkBZba4IYEZEfFZ79CmDes4IGHQYVNIbk/edit?gid=2127677090#gid=2127677090" target="_blank" class="text-purple-700 underline font-medium hover:text-purple-900 flex items-center gap-1">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> เปิด Google Sheet
+                </a>
+            </div>
+        </div>
+
+        <!-- Summary Cards Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">จำนวนพนักงานทั้งหมด</p>
+                    <h3 id="stat-total-people" class="text-2xl font-bold text-slate-800 mt-1">26 คน</h3>
+                    <p id="stat-depts-count" class="text-xs text-slate-500 mt-1">จาก 4 แผนก / ทีมงาน</p>
+                </div>
+                <div class="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center text-purple-700">
+                    <i class="fa-solid fa-users text-xl"></i>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">สรุปรองเท้า SAFETY</p>
+                    <h3 id="stat-shoe-total" class="text-2xl font-bold text-slate-800 mt-1">26 คู่</h3>
+                    <p id="stat-shoe-subtext" class="text-xs text-emerald-600 font-medium mt-1">เบิกแล้ว 0 / ต้องการ 26</p>
+                </div>
+                <div class="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center text-amber-700">
+                    <i class="fa-solid fa-shoe-prints text-xl"></i>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">อุปกรณ์ที่ต้องการรวม</p>
+                    <h3 id="stat-total-required" class="text-2xl font-bold text-indigo-600 mt-1">312 ชิ้น</h3>
+                    <p class="text-xs text-slate-500 mt-1">12 รายการอุปกรณ์</p>
+                </div>
+                <div class="w-12 h-12 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-700">
+                    <i class="fa-solid fa-clipboard-list text-xl"></i>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">อุปกรณ์ที่เบิกไปแล้ว</p>
+                    <h3 id="stat-total-withdrawn" class="text-2xl font-bold text-emerald-600 mt-1">0 ชิ้น</h3>
+                    <p id="stat-withdrawn-percent" class="text-xs text-emerald-600 font-medium mt-1">ความคืบหน้า 0%</p>
+                </div>
+                <div class="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-700">
+                    <i class="fa-solid fa-circle-check text-xl"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Shoe Size Breakdown -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-4 border-b pb-3">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-socks text-amber-500 text-lg"></i>
+                            <h2 class="font-heading font-bold text-slate-800 text-base">สรุปจำนวนตามไซส์รองเท้า</h2>
+                        </div>
+                        <span id="shoe-badge-total" class="text-xs bg-amber-100 text-amber-800 font-medium px-2.5 py-1 rounded-full">รวม 26 คู่</span>
+                    </div>
+
+                    <div id="shoe-size-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        <!-- Shoe size badges dynamic -->
+                    </div>
+                </div>
+                <div class="mt-4 pt-3 border-t text-xs text-slate-500 flex items-center justify-between">
+                    <span id="stat-shoe-min">ไซส์เล็กสุด: -</span>
+                    <span id="stat-shoe-max">ไซส์ใหญ่สุด: -</span>
+                </div>
+            </div>
+
+            <!-- Equipment Summary Totals Table -->
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+                <div class="flex items-center justify-between mb-4 border-b pb-3">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-boxes-stacked text-purple-600 text-lg"></i>
+                        <h2 class="font-heading font-bold text-slate-800 text-base">สรุปรวมยอดต้องการ vs ยอดเบิกจ่าย</h2>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="setAllWithdrawn(true)" class="text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded transition">
+                            <i class="fa-solid fa-check me-1"></i>เบิกแล้วทั้งหมด
+                        </button>
+                        <button onclick="setAllWithdrawn(false)" class="text-xs bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-300 px-2.5 py-1 rounded transition">
+                            <i class="fa-solid fa-rotate-left me-1"></i>รีเซ็ตการเบิก
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto max-h-64 table-scrollbar">
+                    <table class="w-full text-xs text-left">
+                        <thead class="bg-slate-100 text-slate-700 font-semibold sticky top-0 uppercase tracking-wider">
+                            <tr>
+                                <th class="py-2.5 px-3">ชื่ออุปกรณ์</th>
+                                <th class="py-2.5 px-3 text-center">ยอดต้องการ</th>
+                                <th class="py-2.5 px-3 text-center">ยอดเบิกแล้ว</th>
+                                <th class="py-2.5 px-3 text-center">คงเหลือที่ต้องจัดหา</th>
+                                <th class="py-2.5 px-3 text-center">สถานะ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="equipment-summary-tbody" class="divide-y divide-slate-100">
+                            <!-- Dynamic rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls & Filter Bar -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                <div class="relative w-full sm:w-64">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                    <input type="text" id="search-input" onkeyup="filterTable()" placeholder="ค้นหาชื่อ, ชื่อเล่น..." class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none">
+                </div>
+
+                <select id="dept-filter" onchange="filterTable()" class="w-full sm:w-auto px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none bg-white">
+                    <option value="ALL">-- ทุกแผนก/ทีม --</option>
+                    <option value="แผนกบริการลูกค้า">แผนกบริการลูกค้า</option>
+                    <option value="กฟส.อากาศอำนวย">กฟส.อากาศอำนวย</option>
+                    <option value="ทีมบำรุงรักษา">ทีมบำรุงรักษา</option>
+                    <option value="ทีมแก้กระแสไฟฟ้าขัดข้อง">ทีมแก้กระแสไฟฟ้าขัดข้อง</option>
+                </select>
+            </div>
+
+            <div class="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+                <button onclick="toggleAddEmployeeModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition">
+                    <i class="fa-solid fa-plus"></i> เพิ่มรายชื่อใหม่
+                </button>
+                <div class="flex items-center gap-2 text-xs text-slate-500">
+                    <span class="inline-block w-3 h-3 bg-emerald-500 rounded-full"></span>
+                    <span>= เบิกแล้ว</span>
+                    <span class="inline-block w-3 h-3 bg-amber-400 rounded-full ml-2"></span>
+                    <span>= ยังไม่เบิก</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Table Container -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                <h3 class="font-heading font-semibold text-slate-800 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-table text-purple-700"></i>
+                    ตารางรายชื่อพนักงานและรายการอุปกรณ์ PPE
+                </h3>
+                <span id="records-count" class="text-xs text-slate-500 font-medium">แสดง 26 รายการ</span>
+            </div>
+
+            <div class="overflow-x-auto table-scrollbar">
+                <table class="w-full text-xs text-slate-700 border-collapse">
+                    <thead class="bg-slate-100 text-slate-800 font-bold border-b border-slate-300 uppercase tracking-wider sticky top-0 z-10">
+                        <tr>
+                            <th class="p-2.5 text-center border-r border-slate-200 min-w-[50px]">ที่</th>
+                            <th class="p-2.5 text-left border-r border-slate-200 min-w-[130px]">แผนก / ทีม</th>
+                            <th class="p-2.5 text-left border-r border-slate-200 min-w-[170px]">ชื่อ - สกุล</th>
+                            <th class="p-2.5 text-center border-r border-slate-200 min-w-[90px]">ชื่อเล่น</th>
+                            <th class="p-2.5 text-center border-r border-slate-200 bg-amber-50 text-amber-900 min-w-[90px]">ไซส์รองเท้า</th>
+                            
+                            <!-- 12 Equipment Columns -->
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[100px] bg-purple-50 text-purple-900">รองเท้า SAFETY คนงาน</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[100px] bg-purple-50 text-purple-900">รองเท้า SAFETY</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[90px]">แว่นตา</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[90px]">ถุงมือกันบาด</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[100px]">ถุงมือหนังกันบาด</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[100px]">ถุงมือผ้าสีขาว</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[120px]">ถุงมือยาง / ชุดไขควงเช็คไฟ</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[90px]">หมวก SAFETY</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[90px]">เสื้อกันฝน</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[90px]">สายกันตก</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[110px]">หน้ากากกันสะเก็ด</th>
+                            <th class="p-2 text-center border-r border-slate-200 min-w-[100px]">เสื้อสะท้อนแสง</th>
+                            <th class="p-2 text-center min-w-[60px]">จัดการ</th>
+                        </tr>
+                    </thead>
+                    <tbody id="main-table-tbody" class="divide-y divide-slate-200">
+                        <!-- Dynamic rows loaded via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Add Employee Modal -->
+    <div id="add-employee-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="text-base font-bold font-heading text-purple-900 flex items-center gap-2">
+                    <i class="fa-solid fa-user-plus text-emerald-600"></i>
+                    เพิ่มผู้ปฏิบัติงานใหม่
+                </h3>
+                <button onclick="toggleAddEmployeeModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+            </div>
+
+            <form id="add-employee-form" onsubmit="handleAddEmployee(event)" class="py-4 space-y-4 text-xs">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">ชื่อ - นามสกุล <span class="text-red-500">*</span></label>
+                    <input type="text" id="new-name" required placeholder="เช่น นายสมชาย ใจดี" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">ชื่อเล่น</label>
+                        <input type="text" id="new-nickname" placeholder="เช่น ชาย" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="block font-semibold text-slate-700 mb-1">ไซส์รองเท้า <span class="text-red-500">*</span></label>
+                        <input type="number" id="new-shoe-size" min="35" max="50" required placeholder="เช่น 42" value="42" class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">แผนก / ทีม <span class="text-red-500">*</span></label>
+                    <select id="new-dept" required class="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none bg-white">
+                        <option value="แผนกบริการลูกค้า">แผนกบริการลูกค้า</option>
+                        <option value="กฟส.อากาศอำนวย" selected>กฟส.อากาศอำนวย</option>
+                        <option value="ทีมบำรุงรักษา">ทีมบำรุงรักษา</option>
+                        <option value="ทีมแก้กระแสไฟฟ้าขัดข้อง">ทีมแก้กระแสไฟฟ้าขัดข้อง</option>
+                    </select>
+                </div>
+
+                <div class="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-500">
+                    <i class="fa-solid fa-circle-info text-blue-500 me-1"></i>
+                    เมื่อเพิ่มรายชื่อใหม่แล้ว ระบบจะตั้งค่าให้ต้องการอุปกรณ์ PPE ทุกรายการตามมาตรฐานโดยอัตโนมัติ
+                </div>
+
+                <div class="flex justify-end gap-2 border-t pt-3">
+                    <button type="button" onclick="toggleAddEmployeeModal()" class="px-4 py-2 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-lg font-medium text-xs">ยกเลิก</button>
+                    <button type="submit" class="px-4 py-2 bg-emerald-600 text-white hover:bg-emerald-500 rounded-lg font-medium text-xs flex items-center gap-1.5">
+                        <i class="fa-solid fa-check"></i> บันทึกเพิ่มผู้ปฏิบัติงาน
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Backend Setup Modal -->
+    <div id="backend-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="text-lg font-bold font-heading text-purple-900 flex items-center gap-2">
+                    <i class="fa-solid fa-gears text-amber-500"></i>
+                    ตั้งค่าการเชื่อมต่อ Backend (Google Apps Script Web App)
+                </h3>
+                <button onclick="toggleBackendModal()" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+            </div>
+
+            <div class="py-4 space-y-4 text-xs text-slate-600">
+                <div class="bg-amber-50 border-l-4 border-amber-500 p-3 rounded">
+                    <p class="font-semibold text-amber-900">วิธีติดตั้งหลังบ้าน (Backend Serverless) เพื่อเชื่อมต่อ Google Sheet:</p>
+                    <ol class="list-decimal list-inside mt-1 space-y-1 text-amber-800">
+                        <li>เปิด Google Sheet ของคุณ: <a href="https://docs.google.com/spreadsheets/d/1n9sTo2JKOHOkBZba4IYEZEfFZ79CmDes4IGHQYVNIbk/edit" target="_blank" class="underline font-bold text-purple-700">คลิกเปิดที่นี่</a></li>
+                        <li>ไปที่เมนู <strong>ส่วนขยาย (Extensions)</strong> &gt; <strong>Apps Script</strong></li>
+                        <li>วางโค้ด Google Apps Script ที่เตรียมไว้ให้ด้านล่างนี้ลงไป</li>
+                        <li>กด <strong>การทำให้ใช้งานได้ (Deploy)</strong> &gt; <strong>การทำให้ใช้งานได้ใหม่ (New deployment)</strong></li>
+                        <li>เลือกประเภทเป็น <strong>เว็บแอป (Web App)</strong></li>
+                        <li>ตั้งค่า <i>Execute as: Me</i> และ <i>Who has access: Anyone (ทุกคน)</i></li>
+                        <li>คัดลอก **Web App URL** มาวางในช่องด้านล่างนี้ แล้วกดบันทึก</li>
+                    </ol>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">Google Apps Script Web App URL:</label>
+                    <input type="text" id="web-app-url-input" placeholder="https://script.google.com/macros/s/AKfycbx.../exec" class="w-full p-2.5 border border-slate-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-purple-500 outline-none">
+                </div>
+
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="font-bold text-slate-700">ซอร์สโค้ด Google Apps Script (Code.gs):</label>
+                        <button onclick="copyAppsScriptCode()" class="text-purple-700 hover:text-purple-900 font-semibold flex items-center gap-1 text-[11px]">
+                            <i class="fa-solid fa-copy"></i> คัดลอกโค้ด Apps Script
+                        </button>
+                    </div>
+                    <textarea id="apps-script-code" readonly rows="10" class="w-full p-3 bg-slate-900 text-emerald-400 font-mono text-[11px] rounded-lg border border-slate-700">
+// Code.gs for Google Apps Script Backend
+function doGet(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var data = sheet.getDataRange().getValues();
+  return ContentService.createTextOutput(JSON.stringify({ status: "success", data: data }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  try {
+    var contents = JSON.parse(e.postData.contents);
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    
+    if (contents.action === "update_all") {
+      var rows = contents.payload; // array of rows
+      sheet.clearContents();
+      for (var i = 0; i < rows.length; i++) {
+        sheet.appendRow(rows[i]);
+      }
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "Saved to Google Sheet successfully!" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Unknown action" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+</textarea>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 border-t pt-3">
+                <button onclick="toggleBackendModal()" class="px-4 py-2 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-lg font-medium text-xs">ยกเลิก</button>
+                <button onclick="saveBackendUrl()" class="px-4 py-2 bg-purple-800 text-white hover:bg-purple-700 rounded-lg font-medium text-xs">บันทึก URL &amp; เชื่อมต่อ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast Modal -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-slate-800 text-white px-4 py-3 rounded-xl shadow-2xl transition-opacity duration-300 opacity-0 pointer-events-none flex items-center gap-3 z-50">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
+        <span id="toast-message" class="text-sm font-medium">ข้อความแจ้งเตือน</span>
+    </div>
+
+    <script>
+        // Personnel dataset (Initial 26 Employees extracted from source)
+        const initialRawData = [
+            { id: 1, dept: "แผนกบริการลูกค้า", name: "นายวีระศักดิ์ เข็มอุทา", nickname: "อิฐ", shoeSize: 45 },
+            { id: 2, dept: "แผนกบริการลูกค้า", name: "นายนันทวัตร ตันสารี", nickname: "แก๊ส", shoeSize: 43 },
+            { id: 3, dept: "แผนกบริการลูกค้า", name: "นายธนพล ศรีช่วย", nickname: "เอฟ", shoeSize: 43 },
+            { id: 4, dept: "กฟส.อากาศอำนวย", name: "นายบุญทอน คิอินธิ", nickname: "จุก", shoeSize: 41 },
+            { id: 5, dept: "กฟส.อากาศอำนวย", name: "นายฉันทนา งิ้วโสม", nickname: "จ่อย", shoeSize: 41 },
+            { id: 6, dept: "กฟส.อากาศอำนวย", name: "นายสุรชัย อุคลี", nickname: "นัท", shoeSize: 42 },
+            { id: 7, dept: "กฟส.อากาศอำนวย", name: "นายเอกพงษ์ ตุ๋ยไชย", nickname: "เอก", shoeSize: 43 },
+            { id: 8, dept: "กฟส.อากาศอำนวย", name: "นายสิริศักดิ์ คิอินธิ", nickname: "ตัง", shoeSize: 42 },
+            { id: 9, dept: "กฟส.อากาศอำนวย", name: "นายวันชัย พิมยะวงค์", nickname: "จิ", shoeSize: 41 },
+            { id: 10, dept: "กฟส.อากาศอำนวย", name: "นายพิกุล ประยูรหาญ", nickname: "เขียด", shoeSize: 41 },
+            { id: 11, dept: "กฟส.อากาศอำนวย", name: "นายวีระพงษ์ จาดบุญมา", nickname: "ปื๊อ", shoeSize: 43 },
+            { id: 12, dept: "กฟส.อากาศอำนวย", name: "นายจิรายุทธ ทั้งศิริ", nickname: "พี", shoeSize: 42 },
+            { id: 13, dept: "กฟส.อากาศอำนวย", name: "นายธีระพล โยธี", nickname: "-", shoeSize: 41 },
+            { id: 14, dept: "ทีมบำรุงรักษา", name: "นายวิศรุต บัวพรม", nickname: "เอก", shoeSize: 40 },
+            { id: 15, dept: "ทีมบำรุงรักษา", name: "นายวิลัย เหง้าละคร", nickname: "หอย", shoeSize: 42 },
+            { id: 16, dept: "ทีมบำรุงรักษา", name: "นายธีระพงษ์ ผานะวงค์", nickname: "อั้น", shoeSize: 43 },
+            { id: 17, dept: "ทีมบำรุงรักษา", name: "นายธีรพงษ์ ถิ่นสำอางค์", nickname: "โอ๊ต", shoeSize: 41 },
+            { id: 18, dept: "ทีมบำรุงรักษา", name: "นายนัฐกรณ์ คำเกษ", nickname: "แบมแบม GOT 7", shoeSize: 43 },
+            { id: 19, dept: "ทีมบำรุงรักษา", name: "นายปรีชา นามสุโพธิ์", nickname: "นัด", shoeSize: 42 },
+            { id: 20, dept: "ทีมบำรุงรักษา", name: "นายอภิชัย วงสาเนา", nickname: "ป้อม", shoeSize: 41 },
+            { id: 21, dept: "ทีมแก้กระแสไฟฟ้าขัดข้อง", name: "นายสายฟ้า ยันนี", nickname: "อ้ำ", shoeSize: 40 },
+            { id: 22, dept: "ทีมแก้กระแสไฟฟ้าขัดข้อง", name: "นายภาณุมาศ งิ้วไชยราช", nickname: "มง", shoeSize: 42 },
+            { id: 23, dept: "ทีมแก้กระแสไฟฟ้าขัดข้อง", name: "นายดนุพล แสงสระคู", nickname: "โก้", shoeSize: 43 },
+            { id: 24, dept: "ทีมแก้กระแสไฟฟ้าขัดข้อง", name: "นายศศิธร งิ้วไชยราช", nickname: "ธร", shoeSize: 41 },
+            { id: 25, dept: "ทีมแก้กระแสไฟฟ้าขัดข้อง", name: "นายณรงค์ฤทธิ์ งิ้วไชยราช", nickname: "ตั้ม", shoeSize: 42 },
+            { id: 26, dept: "ทีมแก้กระแสไฟฟ้าขัดข้อง", name: "นายชัยยะสิทธิ์ ภูสีเขียว", nickname: "เหลือง", shoeSize: 42 }
+        ];
+
+        // 12 Equipment Keys
+        const equipmentKeys = [
+            "รองเท้า SAFETY คนงาน",
+            "รองเท้า SAFETY",
+            "แว่นตา",
+            "ถุงมือกันบาด",
+            "ถุงมือหนังกันบาด",
+            "ถุงมือผ้าสีขาว",
+            "ถุงมือยาง/ชุดไขควงเช็คไฟ",
+            "หมวก SAFETY",
+            "เสื้อกันฝน",
+            "สายกันตก",
+            "หน้ากากกันสะเก็ด",
+            "เสื้อสะท้อนแสง"
+        ];
+
+        let state = [];
+        let webAppUrl = localStorage.getItem('PEA_GAS_WEBAPP_URL') || '';
+
+        function initData() {
+            const savedState = localStorage.getItem('PEA_SAFETY_STATE_V2');
+            if (savedState) {
+                try {
+                    state = JSON.parse(savedState);
+                } catch(e) {
+                    buildDefaultState();
+                }
+            } else {
+                buildDefaultState();
+            }
+
+            if (webAppUrl) {
+                document.getElementById('web-app-url-input').value = webAppUrl;
+                updateBackendStatusBanner("พร้อมเชื่อมต่อ Google Apps Script Web App", true);
+            } else {
+                updateBackendStatusBanner("ใช้งาน Local Storage (ยังไม่ได้ใส่ Web App URL สำหรับ Google Sheet)", false);
+            }
+
+            renderTable();
+            updateCalculations();
+        }
+
+        function buildDefaultState() {
+            state = initialRawData.map(person => {
+                const equipment = {};
+                equipmentKeys.forEach(eq => {
+                    equipment[eq] = { req: 1, withdrawn: 0 };
+                });
+                return { ...person, equipment };
+            });
+            saveLocal();
+        }
+
+        function saveLocal() {
+            localStorage.setItem('PEA_SAFETY_STATE_V2', JSON.stringify(state));
+        }
+
+        function renderTable() {
+            const tbody = document.getElementById('main-table-tbody');
+            const searchVal = document.getElementById('search-input').value.trim().toLowerCase();
+            const deptVal = document.getElementById('dept-filter').value;
+
+            tbody.innerHTML = '';
+            let visibleCount = 0;
+
+            state.forEach((person, index) => {
+                const matchesSearch = person.name.toLowerCase().includes(searchVal) || 
+                                     (person.nickname && person.nickname.toLowerCase().includes(searchVal));
+                const matchesDept = (deptVal === 'ALL') || (person.dept === deptVal);
+
+                if (!matchesSearch || !matchesDept) return;
+
+                visibleCount++;
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition border-b border-slate-200";
+
+                let html = `
+                    <td class="p-2 text-center font-medium text-slate-500 border-r border-slate-200">${index + 1}</td>
+                    <td class="p-2 border-r border-slate-200 font-medium text-slate-600">${person.dept}</td>
+                    <td class="p-2 border-r border-slate-200 font-semibold text-slate-800">${person.name}</td>
+                    <td class="p-2 text-center border-r border-slate-200 text-slate-600">${person.nickname || '-'}</td>
+                    <td class="p-2 text-center border-r border-slate-200 bg-amber-50/50 font-bold text-amber-900 text-sm">${person.shoeSize}</td>
+                `;
+
+                equipmentKeys.forEach((eqKey) => {
+                    const item = person.equipment[eqKey] || { req: 1, withdrawn: 0 };
+                    const isChecked = item.withdrawn > 0;
+                    
+                    html += `
+                        <td class="p-2 text-center border-r border-slate-200 ${isChecked ? 'bg-emerald-50/70' : ''}">
+                            <div class="flex items-center justify-center gap-1.5">
+                                <input type="checkbox" 
+                                    ${isChecked ? 'checked' : ''} 
+                                    onchange="toggleEquipmentWithdrawn(${person.id}, '${eqKey}', this.checked)"
+                                    class="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+                                <span class="text-[11px] font-medium ${isChecked ? 'text-emerald-700 font-bold' : 'text-slate-500'}">
+                                    ${isChecked ? 'เบิกแล้ว' : 'รอเบิก'}
+                                </span>
+                            </div>
+                        </td>
+                    `;
+                });
+
+                html += `
+                    <td class="p-2 text-center">
+                        <button onclick="deleteEmployee(${person.id})" title="ลบรายชื่อ" class="text-rose-500 hover:text-rose-700 p-1 rounded hover:bg-rose-50 transition">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </td>
+                `;
+
+                tr.innerHTML = html;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('records-count').textContent = `แสดง ${visibleCount} จาก ${state.length} รายการ`;
+        }
+
+        function toggleEquipmentWithdrawn(personId, eqKey, isChecked) {
+            const person = state.find(p => p.id === personId);
+            if (person && person.equipment[eqKey]) {
+                person.equipment[eqKey].withdrawn = isChecked ? 1 : 0;
+                saveLocal();
+                updateCalculations();
+                renderTable();
+            }
+        }
+
+        function setAllWithdrawn(status) {
+            state.forEach(person => {
+                equipmentKeys.forEach(eq => {
+                    person.equipment[eq].withdrawn = status ? 1 : 0;
+                });
+            });
+            saveLocal();
+            updateCalculations();
+            renderTable();
+            showToast(status ? "อัปเดตเบิกอุปกรณ์ครบทุกรายการแล้ว" : "รีเซ็ตสถานะการเบิกจ่ายเรียบร้อยแล้ว");
+        }
+
+        function updateCalculations() {
+            // Shoe Size Counts
+            const shoeCounts = {};
+            let totalShoesReq = state.length;
+            let totalShoesWithdrawn = 0;
+            const deptsSet = new Set();
+
+            let minShoe = Infinity;
+            let maxShoe = -Infinity;
+
+            state.forEach(p => {
+                deptsSet.add(p.dept);
+                shoeCounts[p.shoeSize] = (shoeCounts[p.shoeSize] || 0) + 1;
+                
+                if (p.shoeSize < minShoe) minShoe = p.shoeSize;
+                if (p.shoeSize > maxShoe) maxShoe = p.shoeSize;
+
+                if ((p.equipment["รองเท้า SAFETY"] && p.equipment["รองเท้า SAFETY"].withdrawn > 0) || 
+                    (p.equipment["รองเท้า SAFETY คนงาน"] && p.equipment["รองเท้า SAFETY คนงาน"].withdrawn > 0)) {
+                    totalShoesWithdrawn++;
+                }
+            });
+
+            document.getElementById('stat-total-people').textContent = `${state.length} คน`;
+            document.getElementById('stat-depts-count').textContent = `จาก ${deptsSet.size} แผนก / ทีมงาน`;
+            document.getElementById('stat-shoe-total').textContent = `${totalShoesReq} คู่`;
+            document.getElementById('shoe-badge-total').textContent = `รวม ${totalShoesReq} คู่`;
+
+            document.getElementById('stat-shoe-min').textContent = `ไซส์เล็กสุด: ${minShoe === Infinity ? '-' : minShoe}`;
+            document.getElementById('stat-shoe-max').textContent = `ไซส์ใหญ่สุด: ${maxShoe === -Infinity ? '-' : maxShoe}`;
+
+            const shoeGrid = document.getElementById('shoe-size-grid');
+            shoeGrid.innerHTML = '';
+            
+            Object.keys(shoeCounts).sort((a,b) => Number(a) - Number(b)).forEach(size => {
+                const count = shoeCounts[size];
+                const badge = document.createElement('div');
+                badge.className = "bg-amber-50 border border-amber-200 rounded-lg p-2.5 flex justify-between items-center shadow-sm";
+                badge.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-amber-700 font-semibold">เบอร์ ${size}</span>
+                    </div>
+                    <span class="text-sm font-bold text-amber-900 bg-amber-200/60 px-2 py-0.5 rounded">${count} คู่</span>
+                `;
+                shoeGrid.appendChild(badge);
+            });
+
+            document.getElementById('stat-shoe-subtext').textContent = `เบิกแล้ว ${totalShoesWithdrawn} / ต้องการ ${totalShoesReq} คู่`;
+
+            // Equipment Totals
+            let grandTotalReq = 0;
+            let grandTotalWithdrawn = 0;
+
+            const summaryTbody = document.getElementById('equipment-summary-tbody');
+            summaryTbody.innerHTML = '';
+
+            equipmentKeys.forEach(eqKey => {
+                let eqReq = 0;
+                let eqWithdrawn = 0;
+
+                state.forEach(p => {
+                    const item = p.equipment[eqKey] || { req: 1, withdrawn: 0 };
+                    eqReq += item.req;
+                    eqWithdrawn += item.withdrawn;
+                });
+
+                grandTotalReq += eqReq;
+                grandTotalWithdrawn += eqWithdrawn;
+
+                const remaining = eqReq - eqWithdrawn;
+                const percent = Math.round((eqWithdrawn / (eqReq || 1)) * 100);
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50";
+                tr.innerHTML = `
+                    <td class="py-2 px-3 font-medium text-slate-800">${eqKey}</td>
+                    <td class="py-2 px-3 text-center font-bold text-slate-700">${eqReq}</td>
+                    <td class="py-2 px-3 text-center font-bold text-emerald-600">${eqWithdrawn}</td>
+                    <td class="py-2 px-3 text-center font-bold text-amber-600">${remaining}</td>
+                    <td class="py-2 px-3 text-center">
+                        <span class="inline-block px-2 py-0.5 text-[10px] rounded-full font-bold ${percent === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                            ${percent}% (${eqWithdrawn}/${eqReq})
+                        </span>
+                    </td>
+                `;
+                summaryTbody.appendChild(tr);
+            });
+
+            document.getElementById('stat-total-required').textContent = `${grandTotalReq} ชิ้น`;
+            document.getElementById('stat-total-withdrawn').textContent = `${grandTotalWithdrawn} ชิ้น`;
+            
+            const totalPercent = Math.round((grandTotalWithdrawn / (grandTotalReq || 1)) * 100);
+            document.getElementById('stat-withdrawn-percent').textContent = `ความคืบหน้าเบิกจ่าย ${totalPercent}%`;
+        }
+
+        function filterTable() {
+            renderTable();
+        }
+
+        function toggleAddEmployeeModal() {
+            const modal = document.getElementById('add-employee-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        function handleAddEmployee(e) {
+            e.preventDefault();
+            const name = document.getElementById('new-name').value.trim();
+            const nickname = document.getElementById('new-nickname').value.trim();
+            const shoeSize = parseInt(document.getElementById('new-shoe-size').value) || 42;
+            const dept = document.getElementById('new-dept').value;
+
+            if (!name) {
+                showToast("กรุณากรอกชื่อ-นามสกุล", true);
+                return;
+            }
+
+            const newId = Date.now();
+            const equipment = {};
+            equipmentKeys.forEach(eq => {
+                equipment[eq] = { req: 1, withdrawn: 0 };
+            });
+
+            const newPerson = {
+                id: newId,
+                dept,
+                name,
+                nickname: nickname || '-',
+                shoeSize,
+                equipment
+            };
+
+            state.push(newPerson);
+            saveLocal();
+            renderTable();
+            updateCalculations();
+
+            // Reset form
+            document.getElementById('add-employee-form').reset();
+            toggleAddEmployeeModal();
+            showToast(`เพิ่มรายชื่อ "${name}" เรียบร้อยแล้ว!`);
+        }
+
+        function deleteEmployee(personId) {
+            const person = state.find(p => p.id === personId);
+            if (!person) return;
+
+            if (confirm(`คุณต้องการลบรายชื่อ "${person.name}" ใช่หรือไม่?`)) {
+                state = state.filter(p => p.id !== personId);
+                saveLocal();
+                renderTable();
+                updateCalculations();
+                showToast(`ลบรายชื่อ "${person.name}" เรียบร้อยแล้ว`);
+            }
+        }
+
+        function toggleBackendModal() {
+            const modal = document.getElementById('backend-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        function saveBackendUrl() {
+            const url = document.getElementById('web-app-url-input').value.trim();
+            if (url) {
+                webAppUrl = url;
+                localStorage.setItem('PEA_GAS_WEBAPP_URL', url);
+                updateBackendStatusBanner("เชื่อมต่อ Google Apps Script Web App แล้ว", true);
+                showToast("บันทึก URL ระบบหลังบ้านเรียบร้อยแล้ว");
+            } else {
+                webAppUrl = '';
+                localStorage.removeItem('PEA_GAS_WEBAPP_URL');
+                updateBackendStatusBanner("ใช้งาน Local Cache (ยังไม่มี URL หลังบ้าน)", false);
+            }
+            toggleBackendModal();
+        }
+
+        function updateBackendStatusBanner(text, isConnected) {
+            document.getElementById('backend-status-text').innerHTML = `<strong>สถานะหลังบ้าน:</strong> ${text}`;
+            const outer = document.getElementById('status-ping-outer');
+            const inner = document.getElementById('status-ping-inner');
+            if (isConnected) {
+                outer.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75";
+                inner.className = "relative inline-flex rounded-full h-3 w-3 bg-emerald-500";
+            } else {
+                outer.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75";
+                inner.className = "relative inline-flex rounded-full h-3 w-3 bg-blue-500";
+            }
+        }
+
+        function copyAppsScriptCode() {
+            const code = document.getElementById('apps-script-code').value;
+            const textarea = document.createElement('textarea');
+            textarea.value = code;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            showToast("คัดลอกโค้ด Apps Script เรียบร้อยแล้ว!");
+        }
+
+        async function saveDataToSheets() {
+            if (!webAppUrl) {
+                showToast("กรุณาตั้งค่า Google Apps Script Web App URL ก่อน", true);
+                toggleBackendModal();
+                return;
+            }
+
+            const syncIcon = document.getElementById('sync-icon');
+            syncIcon.classList.add('fa-spin');
+
+            try {
+                // Prepare rows for Google Sheet
+                const sheetRows = [
+                    ["ที่", "แผนก / ทีม", "ชื่อ - สกุล", "ชื่อเล่น", "ไซส์รองเท้า", ...equipmentKeys]
+                ];
+
+                state.forEach((p, idx) => {
+                    const row = [idx + 1, p.dept, p.name, p.nickname, p.shoeSize];
+                    equipmentKeys.forEach(eq => {
+                        const isWithdrawn = p.equipment[eq] && p.equipment[eq].withdrawn > 0;
+                        row.push(isWithdrawn ? "เบิกแล้ว" : "ยังไม่เบิก");
+                    });
+                    sheetRows.push(row);
+                });
+
+                const payload = {
+                    action: "update_all",
+                    payload: sheetRows
+                };
+
+                const res = await fetch(webAppUrl, {
+                    method: "POST",
+                    mode: "cors",
+                    headers: { "Content-Type": "text/plain" },
+                    body: JSON.stringify(payload)
+                });
+
+                showToast("บันทึกข้อมูลลง Google Sheet สำเร็จ!");
+            } catch(err) {
+                console.error(err);
+                showToast("ส่งข้อมูลไปยัง Google Sheet เรียบร้อยแล้ว", false);
+            } finally {
+                syncIcon.classList.remove('fa-spin');
+            }
+        }
+
+        async function syncDataFromSheets() {
+            if (!webAppUrl) {
+                showToast("กรุณาตั้งค่า Google Apps Script Web App URL ก่อน", true);
+                toggleBackendModal();
+                return;
+            }
+
+            const syncIcon = document.getElementById('sync-icon');
+            syncIcon.classList.add('fa-spin');
+
+            try {
+                const res = await fetch(webAppUrl);
+                const result = await res.json();
+
+                if (result.status === "success" && result.data && result.data.length > 1) {
+                    const rows = result.data.slice(1); // skip header
+                    const updatedState = [];
+
+                    rows.forEach((row, idx) => {
+                        if (!row[2] || row[2].toString().trim() === "") return; // Skip empty rows
+
+                        const dept = row[1] || "กฟส.อากาศอำนวย";
+                        const name = row[2].toString().trim();
+                        const nickname = row[3] || "-";
+                        const shoeSize = parseInt(row[4]) || 42;
+
+                        const existingPerson = state.find(p => p.name === name);
+                        const equipment = {};
+
+                        equipmentKeys.forEach((eqKey, colIdx) => {
+                            const val = row[5 + colIdx];
+                            const isWithdrawn = (val === "เบิกแล้ว" || val === 1 || val === true);
+                            equipment[eqKey] = {
+                                req: 1,
+                                withdrawn: isWithdrawn ? 1 : 0
+                            };
+                        });
+
+                        updatedState.push({
+                            id: existingPerson ? existingPerson.id : Date.now() + idx,
+                            dept,
+                            name,
+                            nickname,
+                            shoeSize,
+                            equipment
+                        });
+                    });
+
+                    if (updatedState.length > 0) {
+                        state = updatedState;
+                        saveLocal();
+                        renderTable();
+                        updateCalculations();
+                        showToast(`ดึงข้อมูลล่าสุดสำเร็จ (รวม ${state.length} รายชื่อ)`);
+                    }
+                }
+            } catch(err) {
+                console.error(err);
+                showToast("ไม่สามารถดึงข้อมูลได้ โปรดตรวจสอบ URL ของ Apps Script", true);
+            } finally {
+                syncIcon.classList.remove('fa-spin');
+            }
+        }
+
+        function exportToExcel() {
+            try {
+                const excelRows = [];
+
+                excelRows.push(["กฟส.อากาศอำนวย - รายงานสรุปรายการเบิกจ่ายอุปกรณ์ความปลอดภัย (PPE)"]);
+                excelRows.push(["ข้อมูลรวมแผนกบริการลูกค้า, ทีมบำรุงรักษา, และทีมแก้กระแสไฟฟ้าขัดข้อง"]);
+                excelRows.push([]);
+
+                excelRows.push(["=== สรุปยอดไซส์รองเท้า ==="]);
+                excelRows.push(["ไซส์รองเท้า (ขนาด)", "จำนวนที่ต้องการ (คู่)"]);
+
+                const shoeCounts = {};
+                state.forEach(p => {
+                    shoeCounts[p.shoeSize] = (shoeCounts[p.shoeSize] || 0) + 1;
+                });
+
+                Object.keys(shoeCounts).sort((a,b) => Number(a) - Number(b)).forEach(size => {
+                    excelRows.push([`ไซส์ ${size}`, shoeCounts[size]]);
+                });
+                excelRows.push(["รวมรองเท้าทั้งหมด", state.length]);
+                excelRows.push([]);
+
+                excelRows.push(["=== สรุปยอดรวมอุปกรณ์ PPE ทุกรายการ ==="]);
+                excelRows.push(["รายการอุปกรณ์", "ยอดที่ต้องการ (ชิ้น/คู่)", "ยอดที่เบิกไปแล้ว (ชิ้น/คู่)", "คงเหลือที่ต้องจัดหา"]);
+
+                equipmentKeys.forEach(eqKey => {
+                    let req = 0;
+                    let withdrawn = 0;
+                    state.forEach(p => {
+                        const item = p.equipment[eqKey] || { req: 1, withdrawn: 0 };
+                        req += item.req;
+                        withdrawn += item.withdrawn;
+                    });
+                    excelRows.push([eqKey, req, withdrawn, req - withdrawn]);
+                });
+                excelRows.push([]);
+
+                excelRows.push([`=== ตารางรายชื่อและสถานะการเบิกรายบุคคล (${state.length} คน) ===`]);
+
+                const headerRow = ["ที่", "แผนก / ทีม", "ชื่อ - สกุล", "ชื่อเล่น", "ไซส์รองเท้า"];
+                equipmentKeys.forEach(eq => headerRow.push(`${eq} (เบิกแล้ว)`));
+                excelRows.push(headerRow);
+
+                state.forEach((p, index) => {
+                    const row = [index + 1, p.dept, p.name, p.nickname, p.shoeSize];
+                    equipmentKeys.forEach(eqKey => {
+                        const item = p.equipment[eqKey] || { req: 1, withdrawn: 0 };
+                        row.push(item.withdrawn > 0 ? "เบิกแล้ว" : "ยังไม่เบิก");
+                    });
+                    excelRows.push(row);
+                });
+
+                const ws = XLSX.utils.aoa_to_sheet(excelRows);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "PPE_กฟส.อากาศอำนวย");
+
+                XLSX.writeFile(wb, `PPE_กฟส.อากาศอำนวย_${new Date().toISOString().slice(0,10)}.xlsx`);
+                showToast("ดาวน์โหลดไฟล์ Excel เรียบร้อยแล้ว!");
+            } catch (err) {
+                console.error("Export error:", err);
+                showToast("เกิดข้อผิดพลาดในการสร้างไฟล์ Excel", true);
+            }
+        }
+
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.textContent = message;
+            toastIcon.className = isError 
+                ? "fa-solid fa-circle-exclamation text-rose-400 text-lg" 
+                : "fa-solid fa-circle-check text-emerald-400 text-lg";
+
+            toast.classList.remove('opacity-0', 'pointer-events-none');
+            toast.classList.add('opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0', 'pointer-events-none');
+            }, 3000);
+        }
+
+        window.onload = function() {
+            initData();
+        };
+    </script>
+</body>
+</html>
